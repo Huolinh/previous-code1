@@ -1,0 +1,149 @@
+install.packages("remote")
+remotes::install_github("MRCIEU/TwoSampleMR")
+remotes::install_github("MRCIEU/MRInstruments")
+library(TwoSampleMR)
+a <- read.table("exposure", header = TRUE)
+b <- subset(a, p<5e-08)
+write.csv(b,file = "exposure.csv")
+variable <- system.file("exposure.csv", package = "TwoSampleMR")
+varidable_clump <- read_exposure_data(filename = variable, sep = ",", snp_col = "SNP",
+                                      beta_col = "beta", se_col = "se",
+                                      effect_allele = "effect_allele", 
+                                      other_allele_col = "other_allele", eaf_col = "eaf",
+                                      clump = TRUE)
+c <- read.table("outome", header = TRUE)
+d <- merge(varidable_clamp, c, by.x = "SNP", by.y = "SNP")
+write.csv(d,file = "outcome.csv")
+outcome_data <- read_outcome_data(snps = variable_clump$SNP, filename = "outcome.csv",
+                                  sep = ",", snp_col = "SNP", beta_col = "beta",
+                                  se_col = "se",
+                                  #effect_allele = "effect_allele", 
+                                  other_allele_col = "other_allele",pval_col = "p")
+dat <- harmonise_data(exposure_dat = varidable_clamp, outcome_dat = outcome_data)
+write.csv(dat, file = "final.csv")
+
+#Perform MR###################3
+mr(dat)
+generate_odds_ratios(mr_res = mr(dat))
+#mr_method_list()方法
+A <- mr(dat, method_list = c("mr_ivw", "mr_egger_regression", "mr_weighted_median"))
+mr_scatter_plot(mr_results, dat)#mr_results: output from mr(),dat:output from harmonisedata()
+###在这一步得到的结果中P值需要矫正P/N，P<p/n为存在统计学意义
+B <- mr_heterogeneity(dat)
+mr_funnel_plot(singlesnp_results = B)
+
+#mr_presso for pleiotrophy, outlier, distortion
+mr_presso(BetaOutcome="beta.outcome",#character, name of the outcome variable
+          BetaExposure ="beta.exposure", #vector of characters, name(s) of the exposure(s)
+          SdOutcome ="se.outcome",
+          SdExposure = "se.exposure",OUTLIERtest =TRUE,
+          DISTORTIONtest = TRUE,
+          #mtdata是harmonize之后的
+          data =Mydata, NbDistribution = 1000,SignifThreshold = 0.05)
+#异质性检验,即使有异质性也不会影响结果解读，因为mr_ivw方法相当于随机效应模型，weight_median也可作为辅助解释
+run_mr_heterogeneity(dat)#相当于Cochrane Q test
+run_mr_presso(dat, NbDistribution = 3000)#检验异质性并挑选出来存在异质性的
+
+C <- mr_pleiotropy_test(dat)
+#C看多效性，即暴露因素不存在时SNP对OUTCOME的影响，对应EGGER图y轴纵坐标，从该结果中看P>0.05即纵坐标的一段无意义，无多效性
+#看结果稳健性
+mr_leaveoneout(dat)
+mr_leaveoneout_plot(leaveoneout_results = mr_leaveoneout(dat))
+
+#也可以直接在线连接数据库
+exposure_online <- extract_instruments(outcomes = "包含exposure的数据包名称")
+outcome_online <- extract_outcome_data(snps = exposure_online$SNP, #暴露为暴露数据集，outcome为结局数据集
+                                       outcomes = "选择的结局变量的数据包",
+                                       #proxies = TRUE，#自从查找代理变量，查看帮助包，后续设置为默认无需输入
+                                       )
+
+
+
+#*精神疾病骨质疏松复现MR########
+library("TwoSampleMR")
+library(MRPRESSO)
+library("doParallel")
+#install.packages("openxlsx")
+library("openxlsx")
+library("dplyr")
+#install.packages("purr")
+library(purr)
+exposure <- extract_instruments(outcomes = "ieu-a-22")
+outcome <- extract_outcome_data(snps = exposure$SNP, 
+                                       outcomes = "ieu-a-977",
+                                       proxies = FALSE,#自从查找代理变量，查看帮助包，后续设置为默认无需输入
+)
+dat1117 <- harmonise_data(exposure_dat = exposure, 
+                      outcome_dat = outcome,
+                      action = 2)
+result <- mr(dat1117, method_list = c("mr_ivw", "mr_ivw_fe",
+                                      "mr_two_sample_ml",
+                                      "mr_egger_regression", "mr_weighted_median",
+                                      "mr_penalised_weighted_median"
+))
+
+single <- mr_singlesnp(dat1117)#利用单个SNP进行孟德尔随机化计算出的结果进行汇总可视化，单个不稳健需要关注汇总结果
+mr_forest_plot(single)
+mr_funnel_plot(single)
+mr_scatter_plot(result,dat1117)#(mr results, harmonise results)
+
+a <- generate_odds_ratios(mr_res = result)
+write.table(a, "C:\\Users\\HLH\\Desktop\\noadh1b.txt")
+mr_presso(BetaOutcome="beta.outcome",
+          BetaExposure ="beta.exposure", SdOutcome ="se.outcome",
+          SdExposure = "se.exposure",OUTLIERtest =TRUE,DISTORTIONtest = TRUE,
+          data =dat1117, NbDistribution = 1000,SignifThreshold = 0.05)
+mr_heterogeneity(dat1117)#Q_pvalue<0.05 indicates heterogeneity
+mr_pleiotropy_test(dat1117)#水平多效性,p<0.05存在多效性即egger截距不等于0
+LOO <- mr_leaveoneout(dat1117)#outlier检验，逐步剔除
+mr_leaveoneout_plot(LOO)#剔除单个SNP后的剩余的SNP的meta结果
+
+#*IF=30 BMI&CAD CKD DM，本地导入实操######
+library(TwoSampleMR)
+setwd("D:/资料/孟德尔复现")
+a <- read.table("EGG_BMI_HapMap_DISCOVERY.txt", header = TRUE)
+b <- subset(a, P<5e-8)
+write.csv(b,file = "exposure_bmi.csv")
+#在将数据放入TwoSampleMR之前把导出的csv文件复制到R包所在的位置
+expo <- system.file("exposure_bmi.csv", package = "TwoSampleMR")
+#An example of a text file with the default column names is provided as part of the package,
+bmi_exp_dat <- read_exposure_data(expo)
+head(bmi_exp_dat)
+#If the text file does not have default column names, this can still be read in as follows. 
+varidable_clamp <- read_exposure_data(filename = expo, sep = ",", 
+                                      snp_col = "RSID",
+                                      beta_col = "BETA", se_col = "SE",
+                                      effect_allele = "EA", 
+                                      other_allele_col = "NEA", 
+                                      #encoding = "UTF-8",
+                                      #eaf_col = "eaf",该数据缺失
+                                      clump = TRUE)
+#由于这个文献是从原文中直接获取的，所以直接下载原文提供的表格
+a <- read.csv("exposure_bmi.csv",header = T)
+a <- clump_data(a, clump_r2 = 0.05)#原文设置了r2=0.05
+a <- a[,c(1:8)]
+expo <- system.file("exposure_bmi.csv", package = "TwoSampleMR")
+varidable_clamp <- read_exposure_data(filename = expo, sep = ",", snp_col = "SNP",
+                                      beta_col = "BETA", se_col = "SE",
+                                      effect_allele = "EA", 
+                                      other_allele_col = "NEA", 
+                                      #eaf_col = "eaf",
+                                      clump = F)
+c <- read.table("diagram.mega-meta.txt", header = TRUE)
+d <- merge(varidable_clamp, c, by.x = "SNP", by.y = "SNP")
+write.csv(d,file = "outcome.csv")
+#读取outcome数据,snp为clump之后的exposure数据，filename为outcome数据
+outcome_data <- read_outcome_data(snps = varidable_clamp$SNP, 
+                                  filename = "outcome.csv",
+                                  sep = ",", snp_col = "SNP", 
+                                  beta_col = "BETA",
+                                  se_col = "SE",
+                                  effect_allele = "RISK_ALLELE", 
+                                  other_allele_col = "OTHER_ALLELE",
+                                  pval_col = "P")#根据outcome里面有的列进行修改
+dat <- harmonise_data(exposure_dat = varidable_clamp, outcome_dat = outcome_data)
+write.csv(dat, file = "final.csv")
+A <- mr(dat, method_list = c("mr_ivw", "mr_egger_regression", 
+                             "mr_weighted_median", "mr_simple_median"))
+mr_scatter_plot(A, dat)
+generate_odds_ratios(mr_res = mr(dat))

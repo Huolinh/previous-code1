@@ -1,0 +1,160 @@
+library(readxl)
+aa<- read.csv("C:/Users/HLH/Desktop/BSR.csv")
+install.packages("magrittr")
+library("magrittr")
+install.packages("tidyr")
+library("tidyr")
+install.packages("tidyverse")
+library("tidyverse")
+library(rms)
+library(broom)
+library(scales)
+model = tibble(vars) %>% 
+  mutate(model = map(aa[vars], 
+                     ~ glm(DGF ~ .x, data = aa, family = binomial()))) %>% 
+  mutate(result = map(model, tidy),
+         OR = map(model, ~ exp(coef(.x))),
+         OR_ci = map(model, ~ exp(confint(.x)))) %>% 
+  select(-model) %>% 
+  unnest(c(result, OR, OR_ci))
+
+model = model %>% 
+  mutate(OR_ci %>% as_tibble()) %>% 
+  select(-OR_ci) %>% 
+  rename(LL = V1, UL = V2) %>% 
+  mutate(across(term, ~ str_remove(.x, '.x'))) %>% 
+  filter(if_all(term, ~ !.x=='(Intercept)')) %>% 
+  mutate(`OR(95%CI)` = str_c(round(OR,2), ' (', round(LL,2), '-', round(UL,2), ')')) %>% 
+  select(vars, term, `OR(95%CI)`, p.value, OR, LL, UL, ) %>% 
+  mutate(p.value = pvalue(p.value))
+write.csv(model,file = "D:/资料/rr/univariable1.csv")
+library(tidyverse)
+sigUni <- filter(model, p.value<0.2)
+view(sigUni)
+readr::write_excel_csv(sigUni,"sigUni variable.csv")
+sigUni_variable <- unique(sigUni$vars)
+sigUni_variable <- append(sigUni_variable,"DGF")
+data_mutiLog <- aa[,sigUni_variable]
+Muti_uni <- glm(DGF ~.,
+                data=data_mutiLog,
+                family = binomial)
+summary(Muti_uni)
+library(broom)
+Muti_uni_result <- data.frame(exp(coef(Muti_uni)),
+                              exp(confint(Muti_uni)),tidy(Muti_uni)$p.value) 
+Muti_uni_result
+names(Muti_uni_result) <- c("OR","LOWER","UPPER","P")
+summary(Muti_uni_result)
+Muti_uni_result <- filter(Muti_uni_result, P<0.05)
+aa1 = as.data.frame(subset(aa, select = c(DGF, EE, IV, HBP, SCR)))
+aa2 = as.data.frame(subset(aa, select = c(DGF, EE, IV, HBP, SCR, GENDER, AGE)))
+aa3 = as.data.frame(subset(aa, select = c(DGF, EE, IV, HBP, SCR, GENDER, AGE, 
+                                      WIT, CITg)))
+model1 <- glm(DGF ~ .,
+              data=aa1,
+              family = binomial)
+summary(model1)
+model2 <- glm(DGF ~ .,
+              data=aa2,
+              family = binomial)
+summary(model2)
+model3 <- glm(DGF ~ .,
+              data=aa3,
+              family = binomial)
+summary(model3)
+
+result1 <- data.frame(exp(coef(model1)),
+                              exp(confint(model1)),tidy(model1)$p.value)
+result2 <- data.frame(exp(coef(model2)),
+                      exp(confint(model2)),tidy(model2)$p.value)
+result3 <- data.frame(exp(coef(model3)),
+                      exp(confint(model3)),tidy(model3)$p.value)
+for(i in seq_along(Muti_uni_result)){
+  Muti_uni_result[,i] <- round(Muti_uni_result[,i],2)
+}
+write.csv(Muti_uni_result,file = "D:/资料/rr/MULTISIG3-VAR.csv")
+Muti_uni_result$变量 <-  c("EE","LVED2","IV","HBP")
+library(pROC)
+model_sigVar <- append(Muti_uni_result$变量,"DGF")
+sigLog <- aa[,model_sigVar]
+model <- glm(DGF~.,
+             data=sigLog,
+             family = "binomial")
+summary(model)
+model1 <- glm(DGF~EE+ SV+ LA1+ LVED2+ LVED3+ IV +LVPW1 + LVMI + DV + HBP + HD+
+                DCD + HB + SCR +CYC, 
+             data=aa,
+             family = "binomial")
+summary(model1)
+aa$prob<- predict(model1, type = "response")
+aa$logitP<-log(aa$prob/(1-aa$prob))
+
+library(rms)
+dd=datadist(aa)
+options(datadist="dd")
+f1 <- lrm(DGF~ HBP + IVM + EE, data = aa) 
+nom <- nomogram(f1, fun= function(x)1/(1+exp(-x)),
+                lp=F, funlabel="Risk of DGF")
+plot(nom)
+cal1 <- calibrate(f1, method='boot', 
+                  B=1000,data=aa)
+plot(cal1,lwd=2,lty=1,
+     conf.int=T,
+     errbar.col="blue",
+     col="red", 
+     xlim=c(0.25,0.6),ylim=c(0.15,0.70),
+     xlab="Nomogram-Predicted Probability of 1-Year DFS",
+     ylab="Actual 1-Year DFS (proportion)",
+     subtitles = F)
+pred <- aa$model1
+labels <-aa$DGF
+n_bootstraps <- 1000 
+roc_boot <- NULL  
+for (i in 1:n_bootstraps) {
+  boot_indices <- sample(length(pred), replace = TRUE)
+  boot_pred <- pred[boot_indices]
+  boot_labels <- labels[boot_indices]
+  roc_boot[[i]] <- roc(boot_labels, boot_pred)
+}
+plot(roc_boot[[1]], type = "n", main = "Bootstrap ROC Curve", 
+     xlab = "False Positive Rate", ylab = "True Positive Rate", 
+     legacy.axes=FALSE)+xlim(0,1)
+for (i in 1:n_bootstraps) {
+  lines(roc_boot[[i]], col = "grey", alpha = 0.2)
+}
+roc_mean <- roc(labels,pred,ci=TRUE)  
+lines(roc_mean, col = "blue", lwd = 1)  
+legend("bottomright", legend = c("Bootstrap ROC", "Mean ROC"), 
+       col = c("grey", "blue"), lwd = c(1, 2), bty = "n")
+auc_values <- sapply(roc_boot, function(roc_obj) auc(roc_obj))
+auc_mean <- mean(auc_values)
+auc_sd <- sd(auc_values)
+
+library(rmda)
+m1 <- lrm(DGF~ EE+IV+HBP, 
+          data = aa, x = T, y = T)
+cal1<- calibrate(m1, method = "boot", B = 1000)
+plot(cal1)
+
+m2 <- lrm(DGF~ EE+IV+HBP +AGE+GENDER, data = aa, x = T, y = T)
+cal2<- calibrate(m2, method = "boot", B = 1000)
+plot(cal2)
+
+m3 <- lrm(DGF~ EE+IV+HBP +AGE+GENDER+WIT+CITg, data = aa, x = T, y = T)
+cal3<- calibrate(m3, method = "boot", B = 1000)
+plot(cal3)
+
+
+library(nricens)
+library(PredictABEL) 
+p1= model1$fitted.values
+p2= model2$fitted.values
+p3= model3$fitted.values
+
+reclassification(data = aa, cOutcome = 1, predrisk1 = p2, 
+                 predrisk2 = p1 ,cutoff = c(0,.20,.30,1))
+reclassification(data = aa, cOutcome = 1, predrisk1 = p2, 
+                 predrisk2 = p3 ,cutoff = c(0,.20,.30,1))
+
+nribin(mdl.std= model3, mdl.new = model2, cut = 0.05,
+       niter = 100, updown = 'diff')

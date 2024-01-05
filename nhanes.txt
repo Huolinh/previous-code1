@@ -1,0 +1,588 @@
+ library(nhanesA)
+library(haven)
+library(tidyverse)
+library(survey)
+library(foreign)
+library(Hmisc)
+library(plyr)
+#*sleep pattern#######
+spd <- nhanes("SLQ_D")
+spe <- nhanes("SLQ_E")
+spf <- nhanes("SLQ_F")
+sp <- bind_rows(spd, spe, spf)#n=19574
+sp <- sp[,c(1:2,6:7)]
+sp1 <- sp %>% filter(!((SLD010H==77)|(SLD010H==99)|(SLQ050>3)|(SLQ060>3)))#n=19504
+sp1 <- sp1 %>% mutate(spdur = if_else(((SLD010H <7)|(SLD010H >9)), 1, 0)) %>% 
+  mutate(sptrb = if_else(SLQ050 ==1, 1, 0)) %>% 
+  mutate(spdis = if_else(SLQ060 ==1, 1, 0)) %>% 
+  mutate(sp_pattern = if_else(((spdur+sptrb+spdis)>=2), 1, 0))#sp_pattern=1 means poor
+
+#*shift work#######
+ocd <- nhanes("OCQ_D")
+oce <- nhanes("OCQ_E")
+ocf <- nhanes("OCQ_F")
+oc <- bind_rows(ocd, oce, ocf)#n=19574
+oc <- oc[,c(1,8)]
+oc1 <- oc %>% filter(!((OCQ265== 5)|(OCQ265== 7)|(OCQ265== 9)|is.na(OCQ265))) %>% 
+  mutate(shifter = if_else(OCQ265== 1, 0,1))#n=9458
+
+#*covariate smoke alcohol BMI#######
+smd <- nhanes("SMQ_D")
+sme <- nhanes("SMQ_E")
+smf <- nhanes("SMQ_F")
+sm <- bind_rows(smd, sme, smf)[,c(1,4)]#n=21859
+sm1 <- sm %>% filter(!((SMQ040== 7)|(SMQ040== 9)|is.na(SMQ040))) %>% 
+  mutate(cur_sm = if_else(SMQ040== 3, 0, 1))#n=8015
+ald <- nhanes("ALQ_D")
+ale <- nhanes("ALQ_E")
+alf <- nhanes("ALQ_F")
+al <- bind_rows(ald, ale, alf)[,c(1,2)]#n=16539 
+al1 <- al %>% filter(!((ALQ101== 7)|(ALQ101== 9)|is.na(ALQ101))) %>% 
+  mutate(cur_al = if_else(ALQ101== 2, 0, 1))#n=14905
+bmd <- nhanes("BMX_D")
+bme <- nhanes("BMX_E")
+bmf <- nhanes("BMX_F")
+bm <- bind_rows(bmd, bme, bmf)[,c(1,11)]#n=29965
+bm1 <- bm[complete.cases(bm$BMXBMI),]#n=27222
+
+#*demo#######
+demod <-nhanes('DEMO_D')
+demoe <-nhanes('DEMO_E')
+demof <-nhanes('DEMO_F')
+demo <- bind_rows(demod, demoe, demof)[,c(1,5:6,9,15,17,22,41:43)]
+demo1 <- demo %>% filter(!((DMDEDUC2 == 7)|(DMDEDUC2== 9)|is.na(DMDEDUC2)))%>% 
+  filter(!((DMDMARTL == 77)|(DMDMARTL== 99)|is.na(DMDMARTL))) %>% filter(!(is.na(INDFMPIR)))
+a<- demo1 %>% mutate(RIAGENDR = if_else(RIAGENDR==1,1,0))
+demo1 <- a
+#n=15668
+    
+#*ckd#######
+kfd <- nhanes("BIOPRO_D")
+kfe <- nhanes("BIOPRO_E")
+kff <- nhanes("BIOPRO_F")
+kf <- bind_rows(kfd, kfe, kff)[,c(1,14)]#n=21266
+kf1 <- kf[complete.cases(kf$LBXSCR),]#n=19670
+
+uacrd <- nhanes("ALB_CR_D")
+uacre <- nhanes("ALB_CR_E")
+uacrf <- nhanes("ALB_CR_F")
+uacr <- bind_rows(uacrd, uacre, uacrf)[,c(1:2,4)]#n=24809
+uacr1 <- uacr %>% mutate(uacrr = URXUMA*100/URXUCR) %>% 
+  filter(!is.na(uacrr))
+uacr1 <- uacr1[,c(1,4)]
+#*all data#######
+kfdata <- join_all(list(demo1, kf1, uacr1), by= 'SEQN', type = 'inner')#n=14046 complete cases
+#colSums (is.na (kfdata))
+library(nephro)
+kfdata$egfr<- CKDEpi_RF.creat(kfdata$LBXSCR, kfdata$RIAGENDR, kfdata$RIDAGEYR)#n=14046
+kfdata1 <- kfdata %>% 
+  filter(!((is.na(egfr)&(uacrr<30))|(is.na(uacrr)&(egfr>=60))|(is.na(uacrr)&is.na(egfr))))
+##n=14046 know whether or not CKD
+kfdata1 <- kfdata1 %>% mutate(ckd= if_else(((egfr<60)|(uacrr>=30)),1,0))#n=14046
+data_spckd <- join_all(list(kfdata1, sp1[,c(1,2,5:8)], oc1, 
+                            al1[,c(1,3)], bm1, sm1[,c(1,3)]), by= 'SEQN', type = 'inner')
+#n=6755数据完整 #wrong15515-14603-7450-6842-6820
+#colnames(data_spckd) <- c( 'SEQN', 'gender', 'age','race', 'education', 'marriage', 'pir', 
+ #               'WTMEC2YR', 'SDMVPSU', 'SDMVSTRA', 'scr', 'URXUMA', 'URXUCR', 
+  #              'uacrr', 'egfr', 'ckd', 'sp_pattern', 'shifter', 'cur_alcohol', 
+   #             'bmi')
+library('readr')
+write_csv(data_spckd1, "C:\\Users\\HLH\\Desktop\\data_spckd.csv")
+data_spckd<- read.csv("C:/Users/HLH/Desktop/data_spckd.csv")
+#*smoke#######
+smd <- nhanes("SMQ_D")
+sme <- nhanes("SMQ_E")
+smf <- nhanes("SMQ_F")
+sm <- bind_rows(smd, sme, smf)[,c(1,2,4)]
+sm1 <- sm %>% filter(!((SMQ020==7)|(SMQ020==9)|(is.na(SMQ020)))) %>% 
+  filter(!((SMQ040==7)|(SMQ040==9)|(is.na(SMQ040))))#8015
+spckd_sm <- join_all(list(data_spckd, sm1), by='SEQN', type = 'left')#n=2913
+#*comorbidity######
+#HBP 
+bpd <- nhanes("BPQ_D")
+bpe <- nhanes("BPQ_E")
+bpf <- nhanes("BPQ_F")
+bp <- bind_rows(bpd[,c(1,2,4)], bpe[,c(1,2,5)], bpf[,c(1,2,5)])
+#bp1 <- bp %>% filter(!((BPQ020==7)|(BPQ020==9)|(is.na(BPQ020)))) %>% 
+#  filter(!((BPQ040A==7)|(BPQ040A==9)|(is.na(BPQ040A))))
+bpxd <- nhanes("BPX_D")[,c(1,17,18,20,21,23,24,26,27)]
+bpxe <- nhanes("BPX_E")[,c(1,16,17,19,20,22,23,25,26)]
+bpxf <- nhanes("BPX_F")[,c(1,16,17,19,20,22,23,25,26)]
+bpx <- bind_rows(bpxd, bpxe, bpxf)
+bpx$sbp <- rowMeans(select(bpx,c(BPXSY1,BPXSY2,BPXSY3,BPXSY4)), na.rm = TRUE)
+bpx$dbp <- rowMeans(select(bpx,c(BPXDI1,BPXDI2,BPXDI3,BPXDI4)), na.rm = TRUE)
+ 
+hbp <- join_all(list(bp,bpx),type = 'full',by='SEQN')
+hbp1$HHBP <- if_else((hbp1$BPQ020==2),0,
+                      if_else(((hbp1$BPQ020==1)|(hbp1$BPQ040A==1)|
+                         (hbp1$sbp>=140)|(hbp1$dbp>=90)),1,0))
+
+hbp2 <- hbp1[,c(1,15)]
+hbp1 <- hbp2[complete.cases(hbp2$HHBP),]
+
+spckd_bp <- join_all(list(data_spckd,hbp1), type = 'inner', by = 'SEQN')#6748
+
+#DM 
+dmd <- nhanes("DIQ_D")[,c(1,2,14,17)]
+colnames(dmd)[4]='DIQ070'
+dme <- nhanes("DIQ_E")[,c(1,2,14,17)]
+colnames(dme)[4]='DIQ070'
+dmf <- nhanes("DIQ_F")[,c(1,2,7,10)]
+dmt <- bind_rows(dmd, dme, dmf)#told, insulin, pills
+#dmt1 <- dmt %>% filter(!((DIQ010==3)|(DIQ010==7)|(DIQ010==9)|(is.na(DIQ010)))) %>% 
+ # filter(!((DIQ050==7)|(DIQ050==9)|(is.na(DIQ050)))) %>% 
+  #filter(!((DIQ070==7)|(DIQ070==9)|(is.na(DIQ070))))
+
+
+dmogd <- nhanes("OGTT_D")
+dmoge <- nhanes("OGTT_E")
+dmogf <- nhanes("OGTT_F")
+dmog <- bind_rows(dmogd[,c(1,4)], dmoge[,c(1,12)], dmogf[,c(1,12)])
+#dmog1 <- dmog %>% filter(!(is.na(LBDGLTSI)))#ogtt2 have 7126
+
+dmhbd <- nhanes("GHB_D")
+dmhbe <- nhanes("GHB_E")
+dmhbf <- nhanes("GHB_F")
+dmhb <- bind_rows(dmhbd, dmhbe, dmhbf)
+#dmhb1 <- dmhb %>% filter(!(is.na(LBXGH)))#
+#spckd_dm <- join_all(list(data_spckd,bp1), type = 'left', by = 'SEQN')#19850
+
+dmfgd <- nhanes("GLU_D")
+dmfge <- nhanes("GLU_E")
+dmfgf <- nhanes("GLU_F")
+dmfg <- bind_rows(dmfgd, dmfge, dmfgf)[,c(1,4)]
+#dmfg1 <- dmfg %>% filter(!(is.na(LBDGLUSI)))
+dm <- join_all(list(dmt,dmog, dmhb,dmfg), by = 'SEQN', type = 'full')
+dm$DM <- if_else(dm$DIQ010==2,0,
+                  if_else(((dm$DIQ010==1)|(dm$DIQ050==1)|
+                            (dm$DIQ070==1)|(dm$LBDGLTSI>=11.1)|
+                            (dm$LBXGH>=6.5)|(dm$LBDGLUSI>=7)),1,0))#29597
+dm1 <- dm[complete.cases(dm$DM),c(1,8)]#29419 know whether DM 
+
+#CVD##include heart failure, coronary heart disease,angina/angina pectoris,heart attack,stroke
+cvd <- nhanes("MCQ_D")[,c(1,16,17:20)]
+cve <- nhanes("MCQ_E")[,c(1,21,23,25,27,29)]
+cvf <- nhanes("MCQ_F")[,c(1,22,24,26,28,30)]
+cvt <- bind_rows(cvd, cve, cvf)
+cvt$cvdis <- if_else(((cvt$MCQ160B==1)|(cvt$MCQ160C==1)|(cvt$MCQ160D==1)|
+  (cvt$MCQ160E==1)|(cvt$MCQ160F==1)),1,0)
+#write_csv(cvt, "C:\\Users\\HLH\\Desktop\\cvd合并症.csv")
+cvt <- cvt[complete.cases(cvt$cvdis),c(1,7)]#17132
+#respiratory####asthma,emphysema,chronic bronchitis,
+resd <- nhanes("MCQ_D")[,c(1,2,21,22)]
+rese <- nhanes("MCQ_E")[,c(1,2,31,36)]
+resf <- nhanes("MCQ_F")[,c(1,2,32,37)]
+res <- bind_rows(resd,rese,resf)
+res$MCQ0101 <- if_else(res$MCQ010==2,0,if_else(res$MCQ010==1,1,10,missing = 10),missing = 10)
+res$MCQ160G1 <- if_else(res$MCQ160G==2,0,if_else(res$MCQ160G==1,1,10,missing = 10),missing = 10)
+res$MCQ160K1 <- if_else(res$MCQ160K==2,0,if_else(res$MCQ160K==1,1,10,missing = 10),missing = 10)
+res$resdis <- res$MCQ0101+res$MCQ160G1+res$MCQ160K1
+res$resperitory_dis <- if_else(((res$resdis==1)|(res$resdis==2)|(res$resdis==11)|
+  (res$resdis==12)|(res$resdis==21)),1,0)
+#library('readr')
+#write_csv(res, "C:\\Users\\HLH\\Desktop\\呼吸合并症.csv")
+res <- res[,c(1,9)]
+#BIOPRO###
+biod <-nhanes('BIOPRO_D')
+bioe <-nhanes('BIOPRO_E')
+biof <-nhanes('BIOPRO_F')
+bio <- bind_rows(biod,bioe,biof)
+bio <- bio[,c(1,3:6,8,10,12,15,16,20,21,23,25,29,31:33)]
+colnames(bio) <- c('SEQN','albumin','alt','ast','alk','bun','ca','cholesterol',
+                   'scr','gamagt','fe','ldh','p','bilirubin','tg','ua','na','k')
+
+data_spckd2 <- join_all(list(data_spckd1,bio),by='SEQN',type = 'left')
+datacompl <- na.omit(data_spckd2)
+write_csv(data_spckd2, "C:\\Users\\HLH\\Desktop\\data_spckd_na.csv")
+write_csv(datacompl, "C:\\Users\\HLH\\Desktop\\data_spckd.csv")
+
+
+#*加权##########################################################
+#data_spckd$WEIGHT<- 1/3*data_spckd$WTMEC2YR
+a1 <- svydesign(data = data_spckd, ids = ~SDMVPSU, strata = ~SDMVSTRA,
+                 weights = ~WEIGHT, nest=TRUE)
+summary(a1)
+library(gtsummary)
+table1<- tbl_svysummary(a1, 
+                     by = ckd,  #此处可以加入by作为分列指标
+                     include = c(gender, age, bmi, race,education, marriage,pir, spdur, 
+                                 ab_spdur, sptrb, spdis, sp_pattern, work_shift,
+                                 shifter, cur_alcohol),
+                     label = list(age~'Age(years)', gender~'Gender',
+                                  race~'Race', bmi~'BMI',
+                                  marriage~'Marrital Stage',
+                                  education~'Education Level', 
+                                  pir~'PIR', spdur~'Sleep Duration (h)',
+                                  ab_spdur~'Abnormal Sleep Duration',
+                                  sptrb~'Sleep Trouble',
+                                  spdis~'Sleep Disorder',
+                                  sp_pattern ~'Abnormal Sleep Pattern',
+                                  work_shift~'Work Shift',
+                                  shifter~'Shift Worker',
+                                  cur_alcohol~'Current Alcohol User'),
+                     type = list(gender ~"dichotomous",race~"categorical",
+                                 marriage~"categorical",
+                                 education~"categorical", ab_spdur~"dichotomous", 
+                                 sptrb~"dichotomous",
+                                 spdis~"dichotomous",
+                                 sp_pattern~"dichotomous",
+                                 work_shift~"categorical",
+                                 shifter~"dichotomous",
+                                 cur_alcohol~"dichotomous"),
+                     statistic = list(all_continuous()~"{mean} ({sd})", 
+                                      all_categorical() ~ "{n_unweighted} ({p}%)"),
+                     digits = list(age ~ c(2, 2),
+                                   bmi ~c(2,2),
+                                   spdur~c(2,2)))%>%
+  add_overall()%>%            
+  add_p(
+    test = list(
+      all_continuous() ~ "svy.t.test",
+      all_categorical() ~ "svy.chisq.test"
+    )
+  )%>%
+  #add_n(statistic = "{N_nonmiss_unweighted}",
+  #     col_label = "**N**",
+  #    footnote = TRUE)%>%
+  modify_header(
+    all_stat_cols()~"**{level}**, N = {n_unweighted} ({style_percent(p)}%)",
+    p.value = "**P Value**") %>% #update column header
+  modify_spanning_header(
+    stat_0 ~NA,
+    update = all_stat_cols()~"**CKD**")%>%
+  modify_footnote(
+    update = all_stat_cols()~
+      "mean (SD) for continuous; n(%) for categorical")%>%
+  bold_labels()%>%
+  bold_p(0.05)
+table1
+library(flextable)
+mytable1 <- as_flex_table(table1)
+# 导出word
+save_as_docx(mytable1, path = "C:\\Users\\HLH\\Desktop\\mytable1new.docx")
+t2 <- tbl_svysummary(a1,
+                         by = shifter,
+                         include = c(ckd, uacrr, egfr),
+                     type = list(ckd~'dichotomous'),
+                     statistic = list(all_continuous()~"{mean} ({sd}))", 
+                                      all_categorical() ~ "{n_unweighted} ({p}%)"),
+                     digits = list(uacrr ~ c(2, 2),
+                                   egfr ~c(2,2)))%>%
+  add_overall()%>%
+  add_p(
+    test = list(
+      all_continuous() ~ "svy.t.test",
+      all_categorical() ~ "svy.chisq.test"
+    )
+  ) %>% 
+  modify_spanning_header(
+    stat_0 ~NA,
+    update = all_stat_cols()~"**Shift Worker**")%>%
+  modify_footnote(
+    update = all_stat_cols()~
+      "mean (SD) for continuous; n(%) for categorical")%>%
+  bold_labels()%>%
+  bold_p(0.05)
+t3 <- tbl_svysummary(a1,
+                     by = work_shift,
+                     include = c(ckd, uacrr, egfr),
+                     type = list(ckd~'dichotomous'),
+                     statistic = list(all_continuous()~"{mean} ({sd})", 
+                                      all_categorical() ~ "{n_unweighted} ({p}%)"),
+                     digits = list(uacrr ~ c(2, 2),
+                                   egfr ~c(2,2)))%>%
+  add_overall()%>%
+  add_p(
+    test = list(
+      all_continuous() ~ "svy.ANOVA",
+      all_categorical() ~ "svy.chisq.test"
+    )
+  ) %>%
+  modify_spanning_header(
+    stat_0 ~NA,
+    update = all_stat_cols()~"**Work Shift Type**")%>%
+  modify_footnote(
+    update = all_stat_cols()~
+      "mean (SD) for continuous; n(%) for categorical")%>%
+  bold_labels()%>%
+  bold_p(0.05)
+shifttable <- 
+  tbl_merge(
+    tbls = list(t2, t3),
+    tab_spanner = c("**Shift Worker**","**Shift Type**"))%>%bold_labels()
+mytable2 <- as_flex_table(t2)
+save_as_docx(mytable2, path = "C:\\Users\\HLH\\Desktop\\shifttablenew.docx")
+
+
+t4 <- tbl_svysummary(a1,
+                     by = ab_spdur,
+                     include = c(ckd, uacrr, egfr),
+                     type = list(ckd~'dichotomous'),
+                     statistic = list(all_continuous()~"{mean} ({sd})", 
+                                      all_categorical() ~ "{n_unweighted} ({p}%)"),
+                     digits = list(uacrr ~ c(2, 2),
+                                   egfr ~c(2,2)))%>%
+  add_overall()%>%
+  add_p(
+    test = list(
+      all_continuous() ~ "svy.t.test",
+      all_categorical() ~ "svy.chisq.test"
+    )
+  ) %>% 
+  modify_header(
+    all_stat_cols()~"**{level}**, N = {n_unweighted} ({style_percent(p)}%)",
+    p.value = "**P Value**") %>% #update column header
+  modify_spanning_header(
+    stat_0 ~NA,
+    update = all_stat_cols()~"**Abnormal Sleep duration**")%>%
+  modify_footnote(
+    update = all_stat_cols()~
+      "mean (SD) for continuous; n(%) for categorical")%>%
+  bold_labels()%>%
+  bold_p(0.05)
+t5 <- tbl_svysummary(a1,
+                     by = sptrb,
+                     include = c(ckd, uacrr, egfr),
+                     type = list(ckd~'dichotomous'),
+                     statistic = list(all_continuous()~"{mean} ({sd})", 
+                                      all_categorical() ~ "{n_unweighted} ({p}%)"),
+                     digits = list(uacrr ~ c(2, 2),
+                                   egfr ~c(2,2)))%>%
+  add_p(
+    test = list(
+      all_continuous() ~ "svy.t.test",
+      all_categorical() ~ "svy.chisq.test"
+    )
+  ) %>%
+  modify_header(
+    all_stat_cols()~"**{level}**, n = {n_unweighted} ({style_percent(p)}%)",
+    p.value = "**P Value**") %>% 
+  bold_p(0.05)
+t6 <- tbl_svysummary(a1,
+                     by = spdis,
+                     include = c(ckd, uacrr, egfr),
+                     type = list(ckd~'dichotomous'),
+                     statistic = list(all_continuous()~"{mean} ({sd})", 
+                                      all_categorical() ~ "{n_unweighted} ({p}%)"),
+                     digits = list(uacrr ~ c(2, 2),
+                                   egfr ~c(2,2)))%>%
+  add_p(
+    test = list(
+      all_continuous() ~ "svy.t.test",
+      all_categorical() ~ "svy.chisq.test"
+    )
+  )%>%
+  modify_header(
+    all_stat_cols()~"**{level}**, n = {n_unweighted} ({style_percent(p)}%)",
+    p.value = "**P Value**") %>% 
+  bold_p(0.05)
+t7 <- tbl_svysummary(a1,
+                     by = sp_pattern,
+                     include = c(ckd, uacrr, egfr),
+                     type = list(ckd~'dichotomous'),
+                     statistic = list(all_continuous()~"{mean} ({sd})", 
+                                      all_categorical() ~ "{n_unweighted} ({p}%)"),
+                     digits = list(uacrr ~ c(2, 2),
+                                   egfr ~c(2,2)))%>%
+  add_p(
+    test = list(
+      all_continuous() ~ "svy.t.test",
+      all_categorical() ~ "svy.chisq.test"
+    )
+  )%>%
+  modify_header(
+    all_stat_cols()~"**{level}**, n = {n_unweighted} ({style_percent(p)}%)",
+    p.value = "**P Value**") %>% 
+  bold_p(0.05)
+sptable <- 
+  tbl_merge(
+    tbls = list(t4, t5, t6, t7),
+    tab_spanner = c("**Abnormal Sleep Duration**",
+                    "**Sleep Trouble**",
+                    "**Sleep Disorder**",
+                    "**Abnormal Sleep Pattern**"))%>%bold_labels()
+mytable3 <- as_flex_table(sptable)
+save_as_docx(mytable3, path = "C:\\Users\\HLH\\Desktop\\sleeptable.docx")
+
+
+#*回归crude############
+a1 <- svydesign(data = data_spckd, ids = ~SDMVPSU, strata = ~SDMVSTRA,
+                weights = ~WEIGHT, nest=TRUE)
+set.seed(1229)
+m1<- svyglm(ckd~ shifter,family=quasibinomial(), 
+               design=a1) %>% tbl_regression(
+               exponentiate = TRUE,
+               include = c(shifter),
+               label = list(shifter~'Shift Worker'),
+               conf.level = 0.95,
+               pvalue_fun = function(x) style_pvalue(x, digits = 3)) %>%
+  add_global_p() %>%bold_labels()%>%
+  italicize_levels()%>%
+  bold_p(0.05)
+m2<- svyglm(ckd~ sp_pattern,family=quasibinomial(), 
+            design=a1) %>% tbl_regression(
+              exponentiate = TRUE,
+              include = c(sp_pattern),
+              label = list(sp_pattern~'Abnormal Sleep Pattern'),
+              conf.level = 0.95,
+              pvalue_fun = function(x) style_pvalue(x, digits = 3)) %>%
+  add_global_p() %>%bold_labels()%>%
+  italicize_levels()%>%
+  bold_p(0.05)
+m3<- svyglm(ckd~ spdur,family=quasibinomial(), 
+            design=a1) %>% tbl_regression(
+              exponentiate = TRUE,
+              include = c(spdur),
+              label = list(spdur~'Sleep Duration'),
+              conf.level = 0.95,
+              pvalue_fun = function(x) style_pvalue(x, digits = 3)) %>%
+  add_global_p() %>%bold_labels()%>%
+  italicize_levels()%>%
+  bold_p(0.05)
+m4<- svyglm(ckd~ spdis,family=quasibinomial(), 
+            design=a1) %>% tbl_regression(
+              exponentiate = TRUE,
+              include = c(spdis),
+              label = list(spdis~'Sleep Disorder'),
+              conf.level = 0.95,
+              pvalue_fun = function(x) style_pvalue(x, digits = 3)) %>%
+  add_global_p() %>%bold_labels()%>%
+  italicize_levels()%>%
+  bold_p(0.05)
+m5<- svyglm(ckd~ sptrb,
+            family=quasibinomial(), 
+            design=a1) %>% tbl_regression(
+              exponentiate = TRUE,
+              include = c(sptrb),
+              label = list(sptrb~'Sleep Trouble'),
+              conf.level = 0.95,
+              pvalue_fun = function(x) style_pvalue(x, digits = 3)) %>%
+  add_global_p() %>%bold_labels()%>%
+  italicize_levels()%>%
+  bold_p(0.05)
+#*adjusted logistic#######
+am1<- svyglm(ckd~ shifter+gender+age+race+education+marriage+pir+bmi+cur_alcohol,
+             family=quasibinomial(), 
+            design=a1) %>% tbl_regression(
+              exponentiate = TRUE,
+              include = c(shifter),
+              label = list(shifter~'Shift Worker'),
+              conf.level = 0.95,
+              pvalue_fun = function(x) style_pvalue(x, digits = 3)) %>%
+  add_global_p() %>%bold_labels()%>%
+  italicize_levels()%>%
+  bold_p(0.05)
+am2<- svyglm(ckd~ sp_pattern+gender+age+race+education+marriage+pir+bmi+cur_alcohol,
+             family=quasibinomial(), 
+            design=a1) %>% tbl_regression(
+              exponentiate = TRUE,
+              include = c(sp_pattern),
+              label = list(sp_pattern~'Abnormal Sleep Pattern'),
+              conf.level = 0.95,
+              pvalue_fun = function(x) style_pvalue(x, digits = 3)) %>%
+  add_global_p() %>%bold_labels()%>%
+  italicize_levels()%>%
+  bold_p(0.05)
+am3<- svyglm(ckd~ spdur+gender+age+race+education+marriage+pir+bmi+cur_alcohol,
+             family=quasibinomial(), 
+            design=a1) %>% tbl_regression(
+              exponentiate = TRUE,
+              include = c(spdur),
+              label = list(spdur~'Sleep Duration'),
+              conf.level = 0.95,
+              pvalue_fun = function(x) style_pvalue(x, digits = 3)) %>%
+  add_global_p() %>%bold_labels()%>%
+  italicize_levels()%>%
+  bold_p(0.05)
+am4<- svyglm(ckd~ spdis+gender+age+race+education+marriage+pir+bmi+cur_alcohol,
+             family=quasibinomial(), 
+            design=a1) %>% tbl_regression(
+              exponentiate = TRUE,
+              include = c(spdis),
+              label = list(spdis~'Sleep Disorder'),
+              conf.level = 0.95,
+              pvalue_fun = function(x) style_pvalue(x, digits = 3)) %>%
+  add_global_p() %>%bold_labels()%>%
+  italicize_levels()%>%
+  bold_p(0.05)
+am5<- svyglm(ckd~ sptrb+gender+age+race+education+marriage+pir+bmi+cur_alcohol,
+             family=quasibinomial(), 
+            design=a1) %>% tbl_regression(
+              exponentiate = TRUE,
+              include = c(sptrb),
+              label = list(sptrb~'Sleep Trouble'),
+              conf.level = 0.95,
+              pvalue_fun = function(x) style_pvalue(x, digits = 3)) %>%
+  add_global_p() %>%bold_labels()%>%
+  italicize_levels()%>%
+  bold_p(0.05)
+ft1<- tbl_stack(#粗模型第一列
+  tbls = list(m1, m2, m3, m4, m5))
+ft1
+ft2<- tbl_stack(#矫正型第2列
+  tbls = list(am1, am2, am3, am4, am5))
+ft2
+mergeft <-
+  tbl_merge(
+    tbls = list(ft1, ft2),
+    tab_spanner = c("**Crude Logistic Regression**", 
+                    "**Adjusted Logistic Regression**")
+  )%>%modify_footnote(ci="CI=Confidence Interval", 
+                      abbreviation = TRUE) %>%
+  bold_labels()%>%
+  as_gt() %>%
+  gt::tab_source_note(gt::md("*Adjusted for gender, age, race, education, 
+                             marital status, PIR, BMI, 
+                             current alcohol use*")) 
+
+lgtable <- as_flex_table(mergeft)
+save_as_docx(lgtable, path = "C:\\Users\\HLH\\Desktop\\logistictable.docx")
+#*复杂抽样下回归模型丁香园/构建含weight的数据并加载至环境/添加权重至weight/加载环境
+#*构建含RCS的复杂抽样的logistic回归模型####
+library(rms)
+data_spckd$WEIGHT<- 1/3*data_spckd$WTMEC2YR
+a1 <- svydesign(data = data_spckd, ids = ~SDMVPSU, strata = ~SDMVSTRA,
+                weights = ~WEIGHT, nest=TRUE)
+rcs0<- svyglm(ckd~ rcs(spdur,4),
+                  family=quasibinomial(), design=a1)
+#rcs无法直接svydesign,需要转换权重为rcs可以处理的形式
+data<- rcs0$survey.design$variables #svydesign的data
+#提取拟合结果的权重，添加权重变量至weight(权重实际上是概率的倒数）
+ori.weight<- 1/(rcs0$survey.design$prob)
+mean.weight<- mean(ori.weight)
+data$weights<- ori.weight/mean.weight#原始权重除以平均值得到后续需要的权重
+dd<- rms::datadist(data)#更新环境data
+options(datadist = "dd")
+data_spckd[,c(2,4:6,14,16:22)] <- apply(data_spckd[,c(2,4:6,14,16:22)], 2, factor)
+rcs0<- svyglm(ckd~ rcs(spdur),
+              family=quasibinomial(), design=a1)
+anova(rcs0)#非线性是否有意义
+rcs1<- rms::Glm(ckd~ rcs(spdur), data = data,
+                     weights = weights)#weights来自于前面的data里面的weight
+
+pre.logistic<- rms::Predict(rcs1, spdur, type = "prediction", fun = exp,
+                            ref.zero = T)
+ggplot(pre.logistic)+geom_line(data=pre.logistic, aes(spdur,yhat), 
+                               linetype="solid",
+                               size=1,alpha = 0.7,colour="blue")+
+  theme_classic()+geom_hline(yintercept=1, linetype=2, size=1) + 
+  labs(x="Sleep Duration (h)", y="OR(95%CI)")
+  
+
+rcs00<- svyglm(ckd~ rcs(spdur)+gender+age+race+education+marriage+pir+bmi+cur_alcohol,
+              family=quasibinomial(), design=a1)
+anova(rcs00)#非线性是否有意义
+rcs11<- rms::Glm(ckd~ rcs(spdur)+gender+age+race+education+marriage+pir+bmi+cur_alcohol, 
+                 data = data,
+                weights = weights)#weights来自于前面的data里面的weight
+
+pre.logistic11<- rms::Predict(rcs11, spdur, 
+                              type = "prediction", fun = exp,
+                            ref.zero = T)
+ggplot(pre.logistic11)+geom_line(data=pre.logistic11, aes(spdur,yhat), 
+                               linetype="solid",
+                               size=1,alpha = 0.7,colour="darkred")+
+  theme_classic()+geom_hline(yintercept=1, linetype=2, size=1) + 
+  labs(x="Sleep Duration (h)", y="OR(95%CI)")
+
+
